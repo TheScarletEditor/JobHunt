@@ -11,7 +11,7 @@ Bump this before tagging a release. Follow semver:
   MAJOR when the on-disk SQLite schema requires manual migration.
 """
 
-__version__ = "0.6.0"
+__version__ = "0.6.1"
 __app_name__ = "JobHunt"
 __publisher__ = "The Scarlet Raven"
 __app_id__ = "JobHunt.ScarletRaven"  # registry / GUID-ish id for Inno Setup
