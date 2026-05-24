@@ -99,16 +99,33 @@ class MainWindow(QMainWindow):
         self._on_nav("dashboard")
 
     def _check_for_update(self):
-        """Run the update check on a background QThread so we don't block startup."""
+        """Run the update check on a background QThread so we don't block startup.
+
+        Wrapped so any exception inside check_for_update (network error, SSL
+        problem, bundle missing certifi, etc.) gets caught and logged instead
+        of silently killing the worker before its done signal fires. Without
+        this, a raise in the worker thread would mean the dialog never opens
+        AND no log entry tells us why."""
+        import logging
         from ..updater import check_for_update
         from PySide6.QtCore import QObject, QThread, Signal as _Signal
+
+        log = logging.getLogger("jobhunt.updater")
 
         class _Worker(QObject):
             done = _Signal(object)
 
             def run(self):
-                self.done.emit(check_for_update())
+                try:
+                    result = check_for_update()
+                    log.info("Update check returned: %s",
+                             f"v{result.version}" if result else "no update")
+                    self.done.emit(result)
+                except Exception:
+                    log.exception("Update check raised; treating as no-update.")
+                    self.done.emit(None)
 
+        log.info("Update check starting (background thread)…")
         self._update_thread = QThread(self)
         self._update_worker = _Worker()
         self._update_worker.moveToThread(self._update_thread)
@@ -119,10 +136,14 @@ class MainWindow(QMainWindow):
         self._update_thread.start()
 
     def _on_update_check_done(self, info):
+        import logging
+        log = logging.getLogger("jobhunt.updater")
         self._update_thread = None
         self._update_worker = None
         if info is None:
+            log.info("No update dialog shown (info=None).")
             return
+        log.info("Showing update dialog for v%s.", info.version)
         from .dialogs.update_available import UpdateAvailableDialog
         dlg = UpdateAvailableDialog(info, parent=self)
         dlg.exec()

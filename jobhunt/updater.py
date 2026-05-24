@@ -91,17 +91,19 @@ def check_for_update(*, timeout: int = 5) -> UpdateInfo | None:
         "Accept": "application/vnd.github+json",
         "User-Agent": f"JobHunt/{__version__}",
     })
+    log.info("Update check: GET %s", url)
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             data = json.loads(resp.read().decode("utf-8"))
     except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as e:
-        log.debug("Update check skipped: %s", e)
+        log.info("Update check skipped (network): %s", e)
         return None
     except Exception as e:
-        log.debug("Update check failed: %s", e)
+        log.info("Update check failed: %s", e)
         return None
 
     remote = data.get("tag_name") or data.get("name") or ""
+    log.info("Update check: remote=%s local=%s newer=%s", remote, __version__, is_newer(remote))
     if not remote or not is_newer(remote):
         return None
 
@@ -114,7 +116,7 @@ def check_for_update(*, timeout: int = 5) -> UpdateInfo | None:
             asset_url = asset.get("browser_download_url") or ""
             break
     if not asset_url:
-        log.debug("Newer release %s found but no .exe asset attached", remote)
+        log.info("Newer release %s found but no .exe asset attached", remote)
         return None
 
     return UpdateInfo(
