@@ -1,0 +1,10 @@
+PySide6==6.7.3
+pywin32==308
+python-docx==1.1.2
+pdfplumber==0.11.4
+pypdf==5.1.0
+reportlab==4.2.5
+anthropic>=0.40
+openai>=1.55
+requests==2.32.3
+beautifulsoup4==4.12.3

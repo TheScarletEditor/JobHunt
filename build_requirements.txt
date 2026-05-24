@@ -1,0 +1,12 @@
+# Build-only dependencies. Install with:
+#   pip install -r build_requirements.txt
+# Keep this separate from requirements.txt so the shipped app stays lean —
+# PyInstaller and Pillow weigh ~150 MB combined and have zero runtime use.
+
+# Bundles Python + Qt + jobhunt into a single dist folder.
+# Pin to a known-good major; PyInstaller's PySide6 hook breaks across majors.
+pyinstaller>=6.5,<7.0
+
+# Used by build.py to convert the embedded PNG logo into a multi-resolution
+# .ico for the installer wizard and the Windows shortcut.
+pillow>=10.0

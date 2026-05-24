@@ -1,0 +1,101 @@
+import logging
+import sys
+import traceback
+
+from PySide6.QtCore import Qt
+from PySide6.QtGui import QFont, QIcon, QPixmap
+from PySide6.QtWidgets import QApplication, QMessageBox
+
+from jobhunt import config, theme
+from jobhunt.__version__ import __app_id__
+from jobhunt.db import DB
+from jobhunt.ui.main_window import MainWindow
+from jobhunt.ui.widgets.label_selection import SelectableLabelFilter
+
+
+def _set_windows_app_user_model_id():
+    """Tell Windows to group our taskbar entries under JobHunt's identity.
+
+    Without this, Windows uses the parent process (python.exe / the
+    PyInstaller bootloader) to decide which taskbar icon to display and
+    which app group new windows attach to. Setting an AppUserModelID
+    explicitly is the documented fix — see
+    https://learn.microsoft.com/windows/win32/shell/appids."""
+    if sys.platform != "win32":
+        return
+    try:
+        import ctypes
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(__app_id__)
+    except Exception:
+        # Best-effort. Wrong icon grouping isn't worth a startup crash.
+        pass
+
+
+def _app_icon() -> QIcon:
+    """Decode the embedded raven PNG into a QIcon for the window + taskbar."""
+    try:
+        from jobhunt.assets._logo_data import LOGO_PNG_BYTES
+    except Exception:
+        return QIcon()
+    pix = QPixmap()
+    if not pix.loadFromData(LOGO_PNG_BYTES, "PNG"):
+        return QIcon()
+    return QIcon(pix)
+
+
+def _setup_logging():
+    config.APPDATA_DIR.mkdir(parents=True, exist_ok=True)
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+        handlers=[
+            logging.FileHandler(config.LOG_PATH, encoding="utf-8"),
+            logging.StreamHandler(sys.stderr),
+        ],
+    )
+
+
+def _install_excepthook():
+    def handler(exc_type, exc_value, exc_tb):
+        if issubclass(exc_type, KeyboardInterrupt):
+            sys.__excepthook__(exc_type, exc_value, exc_tb)
+            return
+        tb_str = "".join(traceback.format_exception(exc_type, exc_value, exc_tb))
+        logging.error("Unhandled exception:\n%s", tb_str)
+        try:
+            QMessageBox.critical(
+                None,
+                "JobHunt — unexpected error",
+                f"{exc_type.__name__}: {exc_value}\n\n"
+                f"Full traceback logged to:\n{config.LOG_PATH}",
+            )
+        except Exception:
+            pass
+
+    sys.excepthook = handler
+
+
+def main() -> int:
+    _setup_logging()
+    _install_excepthook()
+    _set_windows_app_user_model_id()
+    QApplication.setHighDpiScaleFactorRoundingPolicy(Qt.HighDpiScaleFactorRoundingPolicy.PassThrough)
+    app = QApplication(sys.argv)
+    app.setApplicationName("JobHunt")
+    app.setStyle("Fusion")
+    app.setFont(QFont("Segoe UI", 11))
+    app.setStyleSheet(theme.stylesheet())
+    app.setWindowIcon(_app_icon())
+
+    label_filter = SelectableLabelFilter(app)
+    app.installEventFilter(label_filter)
+
+    DB.connect()
+
+    window = MainWindow()
+    window.show()
+    return app.exec()
+
+
+if __name__ == "__main__":
+    sys.exit(main())

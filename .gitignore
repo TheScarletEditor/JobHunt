@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+
+# Virtual envs
+.venv/
+venv/
+env/
+
+# Build artifacts — these can be hundreds of MB each
+build/
+dist/
+installer/JobHunt.ico
+installer/Output/
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Per-user runtime data — never commit
+*.db
+*.sqlite
+*.sqlite3
+.env
