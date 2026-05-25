@@ -1244,6 +1244,107 @@ class _ResumeTypesTab(QWidget):
         self._load()
 
 
+class _UpdatesTab(QWidget):
+    """Auto-updater preferences. Reads + writes settings_kv keys consumed by
+    MainWindow._check_for_update on launch."""
+
+    _FREQ_OPTIONS = [
+        ("Every launch",        "every_launch"),
+        ("Once per day",        "daily"),
+        ("Once per week",       "weekly"),
+        ("Never (manual only)", "never"),
+    ]
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        outer = _tab_outer(self)
+
+        outer.addWidget(_section_header(
+            "Updates",
+            "JobHunt checks GitHub for newer releases a few seconds after launch. "
+            "Control how often that happens here."
+        ))
+
+        card, card_layout = _card()
+
+        # On/off toggle.
+        self.enabled_cb = QCheckBox("Check for updates on launch")
+        self.enabled_cb.setChecked(DB.get_setting("update_check_enabled", "1") == "1")
+        self.enabled_cb.toggled.connect(self._on_enabled_toggled)
+        card_layout.addWidget(self.enabled_cb)
+
+        # Frequency combo — disabled when the toggle is off.
+        freq_row = QHBoxLayout()
+        freq_label = QLabel("Frequency:")
+        freq_label.setStyleSheet(f"color: {config.COLOR_TEXT_DIM};")
+        self.freq_combo = QComboBox()
+        for label, _value in self._FREQ_OPTIONS:
+            self.freq_combo.addItem(label)
+        current = DB.get_setting("update_check_frequency", "every_launch") or "every_launch"
+        idx = next((i for i, (_, v) in enumerate(self._FREQ_OPTIONS) if v == current), 0)
+        self.freq_combo.setCurrentIndex(idx)
+        self.freq_combo.currentIndexChanged.connect(self._on_freq_changed)
+        freq_row.addWidget(freq_label)
+        freq_row.addWidget(self.freq_combo)
+        freq_row.addStretch(1)
+        card_layout.addLayout(freq_row)
+
+        # Last-check status line.
+        last = DB.get_setting("last_update_check_at")
+        last_text = f"Last check: {last}" if last else "Last check: never"
+        self.last_label = QLabel(last_text)
+        self.last_label.setStyleSheet(f"color: {config.COLOR_TEXT_FAINT}; font-size: 11px;")
+        card_layout.addWidget(self.last_label)
+
+        # Manual "Check now" button — useful when frequency=never.
+        check_btn_row = QHBoxLayout()
+        check_btn = QPushButton("Check now")
+        check_btn.setObjectName("GhostButton")
+        check_btn.clicked.connect(self._on_check_now)
+        check_btn_row.addWidget(check_btn)
+        check_btn_row.addStretch(1)
+        card_layout.addLayout(check_btn_row)
+
+        # Reflect the initial enabled state into the combo.
+        self.freq_combo.setEnabled(self.enabled_cb.isChecked())
+
+        outer.addWidget(card)
+        outer.addStretch(1)
+
+    def _on_enabled_toggled(self, checked: bool):
+        DB.set_setting("update_check_enabled", "1" if checked else "0")
+        self.freq_combo.setEnabled(checked)
+
+    def _on_freq_changed(self, idx: int):
+        if not 0 <= idx < len(self._FREQ_OPTIONS):
+            return
+        _, value = self._FREQ_OPTIONS[idx]
+        DB.set_setting("update_check_frequency", value)
+
+    def _on_check_now(self):
+        """Force an out-of-band check. Resets `last_update_check_at` so the
+        next launch's frequency window starts fresh too."""
+        from ...updater import check_for_update
+        # We deliberately don't use a worker thread here — clicking "Check now"
+        # is an explicit action and a brief blocking call (<5s timeout) is
+        # acceptable. Spinner UX would require restructuring; keep it simple.
+        try:
+            info = check_for_update()
+        except Exception as e:
+            QMessageBox.warning(self, "Check failed", f"Couldn't reach GitHub:\n{e}")
+            return
+        from datetime import datetime
+        now = datetime.now().isoformat(timespec="seconds")
+        DB.set_setting("last_update_check_at", now)
+        self.last_label.setText(f"Last check: {now}")
+        if info is None:
+            QMessageBox.information(self, "Up to date", "You're on the latest version.")
+            return
+        # Newer release found — show the same dialog the auto-check would have.
+        from ..dialogs.update_available import UpdateAvailableDialog
+        UpdateAvailableDialog(info, parent=self).exec()
+
+
 class _BackupTab(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -1257,8 +1358,9 @@ class _BackupTab(QWidget):
         card, card_layout = _card()
         info = QLabel(
             "Export creates a JSON snapshot of every table — safe to commit to a "
-            "private Git repo or stash on a USB stick. Restore replaces current "
-            "data with the contents of a snapshot (Phase 6)."
+            "private Git repo or stash on a USB stick. Restore wipes the current "
+            "database and loads a snapshot in its place; a pre-restore copy of "
+            "the live DB is saved next to it so you can revert if needed."
         )
         info.setWordWrap(True)
         info.setStyleSheet(f"color: {config.COLOR_TEXT_DIM};")
@@ -1300,11 +1402,81 @@ class _BackupTab(QWidget):
         QMessageBox.information(self, "Exported", f"Backup saved to:\n{path}")
 
     def _restore(self):
+        """Full-replace restore from a JobHunt JSON backup.
+
+        Gated by an explicit confirmation that requires the user to type
+        `REPLACE` so it's hard to fire by accident — restore wipes everything
+        currently in the database. A pre-restore copy of the DB file is
+        always taken first, in case the user changes their mind."""
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Restore from JSON", "", "JSON (*.json);;All files (*.*)"
+        )
+        if not path:
+            return
+
+        # Validate first — never wipe anything before we know the backup is sane.
+        from ...db.restore import load_and_validate, restore_from_file, RestoreError
+        try:
+            _snapshot, summary = load_and_validate(path)
+        except RestoreError as e:
+            QMessageBox.warning(self, "Can't restore", str(e))
+            return
+
+        # Build a human-readable preview from the row counts.
+        highlights = []
+        for key in ("applications", "resume_versions", "cover_letters", "interviews", "saved_searches"):
+            if summary.get(key):
+                highlights.append(f"  · {summary[key]} {key.replace('_', ' ')}")
+        preview = "\n".join(highlights) if highlights else "  · (empty backup)"
+
+        # REPLACE confirmation gate — same UX pattern as the Reset Zone.
+        text, ok = QInputDialog.getText(
+            self, "Confirm restore",
+            "This will replace ALL data with the contents of:\n"
+            f"{path}\n\n"
+            f"Backup contents:\n{preview}\n\n"
+            "A copy of your current data will be saved as\n"
+            "  jobhunt.db.pre-restore-<timestamp>.bak  next to your DB\n"
+            "so you can revert if needed.\n\n"
+            "Type REPLACE to confirm:"
+        )
+        if not ok or text.strip() != "REPLACE":
+            QMessageBox.information(self, "Cancelled", "Restore cancelled. Nothing changed.")
+            return
+
+        # The DB module holds an open connection. Close it cleanly so the
+        # file isn't locked when restore_from_file overwrites it via the
+        # .bak fallback path.
+        try:
+            DB.close()
+        except Exception:
+            pass
+
+        try:
+            result = restore_from_file(config.DB_PATH, path)
+        except RestoreError as e:
+            QMessageBox.critical(
+                self, "Restore failed",
+                f"{e}\n\nYour data was reverted to its pre-restore state."
+            )
+            # Re-open so the running app keeps functioning on the reverted DB.
+            DB.connect()
+            return
+
+        # Re-open and replay schema migrations so the new DB matches the
+        # current build's expectations even if the backup is older.
+        DB.connect()
+        DB.log_audit("backup_restored", {
+            "source": path,
+            "pre_restore_backup": result["pre_restore_backup"],
+            "total_rows": result["total_rows"],
+        })
         QMessageBox.information(
-            self, "Restore",
-            "Restore is implemented in Phase 6 with proper validation. "
-            "For now, you can manually replace the database file:\n\n"
-            f"{config.DB_PATH}"
+            self, "Restored",
+            f"Restore complete — loaded {result['total_rows']} rows across "
+            f"{len(result['inserted'])} tables.\n\n"
+            f"Pre-restore copy saved to:\n{result['pre_restore_backup']}\n\n"
+            "Please restart JobHunt to refresh every page from the new data."
         )
 
 
@@ -1961,6 +2133,7 @@ class SettingsPage(QWidget):
         tabs.addTab(_StagesTab(), "Pipeline Stages")
         tabs.addTab(_ResumeTypesTab(), "Resume Types")
         tabs.addTab(_BackupTab(), "Backup")
+        tabs.addTab(_UpdatesTab(), "Updates")
         tabs.addTab(_ImapTab(), "IMAP")
         tabs.addTab(_CalendarTab(), "Calendar")
         tabs.addTab(_DangerZoneTab(), "Reset")
@@ -1985,6 +2158,6 @@ class SettingsPage(QWidget):
                 "Set up at least one API key (Claude or OpenAI) under API Keys to unlock AI features.",
                 "Fill in your Profile so ATS forms auto-fill correctly later in Phase 4.",
                 "Add at least one Resume Type so you can import a resume and start tailoring.",
-                "Export a JSON backup before making big changes — restore lands in Phase 6.",
+                "Export a JSON backup before making big changes — restore replays the snapshot in full.",
             ],
         }

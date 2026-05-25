@@ -32,12 +32,14 @@
 #endif
 
 #define MyAppName      "JobHunt"
-#define MyAppPublisher "The Scarlet Raven"
+#define MyAppPublisher "The Scarlet Coder"
 #define MyAppURL       "https://github.com/TheScarletEditor/JobHunt"
 #define MyAppExeName   "JobHunt.exe"
 ; Stable AppId — DO NOT change between releases. This is what lets Inno Setup
 ; recognize "this is an upgrade of the same product" rather than installing
-; a second copy alongside the old one.
+; a second copy alongside the old one. Kept verbatim through the v0.6.3
+; "Scarlet Raven → Scarlet Coder" rename so existing 0.6.0–0.6.2 installs
+; upgrade in place rather than installing alongside.
 #define MyAppId        "{{A1B2C3D4-5E6F-4A8B-9C0D-1E2F3A4B5C6D}"
 
 [Setup]

@@ -11,7 +11,11 @@ Bump this before tagging a release. Follow semver:
   MAJOR when the on-disk SQLite schema requires manual migration.
 """
 
-__version__ = "0.6.2"
+__version__ = "0.6.3"
 __app_name__ = "JobHunt"
-__publisher__ = "The Scarlet Raven"
-__app_id__ = "JobHunt.ScarletRaven"  # registry / GUID-ish id for Inno Setup
+__publisher__ = "The Scarlet Coder"
+# Internal identifier — DELIBERATELY KEEPS "ScarletRaven" so the Windows
+# AppUserModelID stays stable across the v0.6.3 brand rename. Changing it
+# would orphan taskbar pins / "recent" entries on every existing install.
+# The visible publisher string is __publisher__ above; internal ids stay.
+__app_id__ = "JobHunt.ScarletRaven"

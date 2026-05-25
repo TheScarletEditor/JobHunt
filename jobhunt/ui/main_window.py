@@ -96,21 +96,83 @@ class MainWindow(QMainWindow):
         # there's no newer release.
         QTimer.singleShot(4000, self._check_for_update)
 
+        # First-launch onboarding wizard. Tiny delay so the main window
+        # paints first; the modal then comes up on top with the dashboard
+        # visible behind it.
+        QTimer.singleShot(500, self._maybe_show_onboarding)
+
         self._on_nav("dashboard")
+
+    def _maybe_show_onboarding(self):
+        """Fire the welcome wizard on truly fresh installs only.
+
+        Triggers when the profile row has no name/email AND no API keys are
+        stored AND the `onboarded` flag has never been set. Subsequent
+        launches (or anyone who has already typed even one field in
+        Settings) won't see it again."""
+        try:
+            from .dialogs.onboarding_wizard import OnboardingWizard, should_show_wizard
+            if not should_show_wizard():
+                return
+            OnboardingWizard(parent=self).exec()
+            # After the wizard runs, the freshly-saved profile / resume
+            # should be reflected on the dashboard. Re-trigger the page's
+            # refresh hook so it picks up the new state.
+            page = self.pages.get("dashboard")
+            if page is not None and hasattr(page, "refresh"):
+                try:
+                    page.refresh()
+                except Exception:
+                    pass
+        except Exception:
+            # Wizard errors must never block the main app from being usable.
+            import logging
+            logging.getLogger("jobhunt.onboarding").exception(
+                "Onboarding wizard failed; continuing without it."
+            )
 
     def _check_for_update(self):
         """Run the update check on a background QThread so we don't block startup.
 
+        Respects user preferences in `settings_kv`:
+          * `update_check_enabled` — '0'/'1' (default '1')
+          * `update_check_frequency` — one of:
+                'every_launch' (default), 'daily', 'weekly', 'never'
+          * `last_update_check_at` — ISO timestamp of the most recent attempt
+        Plus the `JOBHUNT_NO_UPDATE` env var, which always wins (dev escape).
+
         Wrapped so any exception inside check_for_update (network error, SSL
         problem, bundle missing certifi, etc.) gets caught and logged instead
-        of silently killing the worker before its done signal fires. Without
-        this, a raise in the worker thread would mean the dialog never opens
-        AND no log entry tells us why."""
+        of silently killing the worker before its done signal fires."""
         import logging
+        from datetime import datetime, timedelta
         from ..updater import check_for_update
         from PySide6.QtCore import QObject, QThread, Signal as _Signal
+        from ..db import DB
 
         log = logging.getLogger("jobhunt.updater")
+
+        # 1) Honor the user's master on/off switch.
+        if DB.get_setting("update_check_enabled", "1") != "1":
+            log.info("Update check skipped: disabled in Settings.")
+            return
+
+        # 2) Honor the frequency knob unless this is the first launch.
+        freq = DB.get_setting("update_check_frequency", "every_launch") or "every_launch"
+        if freq == "never":
+            log.info("Update check skipped: frequency=never.")
+            return
+        last = DB.get_setting("last_update_check_at")
+        if last and freq in ("daily", "weekly"):
+            try:
+                prev = datetime.fromisoformat(last)
+                window = timedelta(days=1 if freq == "daily" else 7)
+                if datetime.now() - prev < window:
+                    log.info("Update check skipped: last check %s, frequency=%s.", last, freq)
+                    return
+            except ValueError:
+                # Corrupt timestamp — proceed with the check and re-stamp.
+                log.info("Couldn't parse last_update_check_at=%r; running check anyway.", last)
 
         class _Worker(QObject):
             done = _Signal(object)
@@ -125,7 +187,12 @@ class MainWindow(QMainWindow):
                     log.exception("Update check raised; treating as no-update.")
                     self.done.emit(None)
 
-        log.info("Update check starting (background thread)…")
+        log.info("Update check starting (frequency=%s, last=%s)…", freq, last)
+        # Stamp the attempt *now* so a failed check still counts against the
+        # frequency window — otherwise a flaky connection could spam the API
+        # on every launch.
+        DB.set_setting("last_update_check_at", datetime.now().isoformat(timespec="seconds"))
+
         self._update_thread = QThread(self)
         self._update_worker = _Worker()
         self._update_worker.moveToThread(self._update_thread)

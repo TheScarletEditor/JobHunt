@@ -5,7 +5,8 @@ self-contained (no external files to ship alongside the `.exe`).
 
 ## `_logo_data.py`
 
-Base64-encoded PNG of **The Scarlet Raven** logo — the sidebar mark.
+Base64-encoded PNG of the JobHunt mascot — a raven. The bird is the
+visual mark for **The Scarlet Coder** publisher identity.
 
 - Decoded into `LOGO_PNG_BYTES` at import time
 - Loaded by [`ui/sidebar.py`](../ui/sidebar.py) into a 72×72 `QPixmap`

@@ -1,12 +1,15 @@
-"""Base64-encoded PNG of The Scarlet Raven logo.
+"""Base64-encoded PNG of the JobHunt mascot — a raven.
 
-Embedded so the app ships with the brand mark — no external file required.
-Decoded once at import time into LOGO_PNG_BYTES.
+The bird is the mascot of The Scarlet Coder. Embedded so the app ships
+with the brand mark — no external file required. Decoded once at import
+time into LOGO_PNG_BYTES. Module name kept as `_logo_data` (rather than
+`_raven_data`) so existing imports across the codebase keep working.
 """
 
 import base64
 
-# Original: TheScarletRaven.png (Scarlet Raven AI software services)
+# Original: TheScarletRaven.png — the source asset's filename predates
+# the v0.6.3 publisher rename and stays as-is on disk.
 # Source size: 199751 bytes  ·  base64 size: 266336 chars
 
 _B64 = (

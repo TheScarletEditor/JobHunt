@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 from PySide6.QtCore import Qt, QTimer
+from PySide6.QtGui import QAction
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QComboBox,
     QTextEdit, QFrame, QTabWidget, QTableWidget, QTableWidgetItem,
     QHeaderView, QMessageBox, QDialog, QFormLayout, QLineEdit, QPlainTextEdit,
     QDialogButtonBox, QStackedWidget, QScrollArea, QInputDialog, QSizePolicy,
-    QSplitter, QTextBrowser,
+    QSplitter, QTextBrowser, QToolButton, QMenu, QFileDialog,
 )
 
 from ... import config
@@ -391,8 +392,19 @@ class _LettersTabWidget(QWidget):
         self.save_btn.setObjectName("PrimaryButton")
         self.save_btn.clicked.connect(self._on_save)
         header.addWidget(self.save_btn)
-        export_btn = QPushButton("Export…")
-        export_btn.clicked.connect(self._on_export)
+        export_btn = QToolButton()
+        export_btn.setText("Export ▾")
+        export_btn.setToolTip("Export this cover letter")
+        export_btn.setPopupMode(QToolButton.InstantPopup)
+        export_btn.setObjectName("GhostButton")
+        export_menu = QMenu(export_btn)
+        act_docx = QAction("Export as Word (.docx)", export_menu)
+        act_docx.triggered.connect(lambda: self._on_export("docx"))
+        export_menu.addAction(act_docx)
+        act_pdf = QAction("Export as PDF (.pdf)", export_menu)
+        act_pdf.triggered.connect(lambda: self._on_export("pdf"))
+        export_menu.addAction(act_pdf)
+        export_btn.setMenu(export_menu)
         header.addWidget(export_btn)
         outer.addLayout(header)
 
@@ -561,7 +573,12 @@ class _LettersTabWidget(QWidget):
         DB.log_audit("cover_letter_saved", {"application_id": self.current_application_id})
         QMessageBox.information(self, "Saved", "Cover letter saved.")
 
-    def _on_export(self):
+    def _on_export(self, fmt: str = "docx"):
+        """Export the current cover letter. Format chosen explicitly via the
+        dropdown menu — the save dialog stays locked to that single extension."""
+        fmt = fmt.lower()
+        if fmt not in ("docx", "pdf"):
+            fmt = "docx"
         content = self.editor.toPlainText().strip()
         if not content:
             QMessageBox.warning(self, "Empty", "Nothing to export — the editor is empty.")
@@ -576,35 +593,29 @@ class _LettersTabWidget(QWidget):
             if row:
                 app_label = f"{row['company']}_{row['role']}".replace(" ", "_")
 
-        from PySide6.QtWidgets import QFileDialog
-        path, selected_filter = QFileDialog.getSaveFileName(
-            self, "Export cover letter",
-            f"cover_letter_{app_label}.docx",
-            "Word Document (*.docx);;PDF Document (*.pdf)",
+        title = "Export cover letter as PDF" if fmt == "pdf" else "Export cover letter as Word"
+        file_filter = "PDF Document (*.pdf)" if fmt == "pdf" else "Word Document (*.docx)"
+        path, _ = QFileDialog.getSaveFileName(
+            self, title, f"cover_letter_{app_label}.{fmt}", file_filter,
         )
         if not path:
             return
-
-        lower = path.lower()
-        is_pdf = lower.endswith(".pdf") or "PDF" in (selected_filter or "")
-        if is_pdf and not lower.endswith(".pdf"):
-            path += ".pdf"
-        elif not is_pdf and not lower.endswith(".docx"):
-            path += ".docx"
+        if not path.lower().endswith(f".{fmt}"):
+            path += f".{fmt}"
 
         profile_row = DB.query_one("SELECT * FROM profile WHERE id = 1")
         profile = dict(profile_row) if profile_row else {}
 
         try:
             from ...documents.export import export_cover_letter_docx, export_cover_letter_pdf
-            if is_pdf:
+            if fmt == "pdf":
                 export_cover_letter_pdf(content, path, profile)
             else:
                 export_cover_letter_docx(content, path, profile)
         except Exception as e:
             QMessageBox.warning(self, "Export error", f"Couldn't export:\n{e}")
             return
-        DB.log_audit("cover_letter_exported", {"path": path, "format": "pdf" if is_pdf else "docx"})
+        DB.log_audit("cover_letter_exported", {"path": path, "format": fmt})
         QMessageBox.information(self, "Exported", f"Saved to:\n{path}")
 
 

@@ -9,7 +9,11 @@ from ..__version__ import __version__
 
 
 def _load_logo_pixmap(size: int = 72) -> QPixmap | None:
-    """Decode the embedded Scarlet Raven PNG into a scaled QPixmap.
+    """Decode the embedded raven mascot PNG into a scaled QPixmap.
+
+    The bird is named Raven; the publisher is The Scarlet Coder. The
+    `_logo_data` module name is kept stable to avoid breaking imports
+    across the v0.6.3 brand rename.
     Returns None if the embed module is missing (treat as a soft failure)."""
     try:
         from ..assets._logo_data import LOGO_PNG_BYTES
@@ -65,7 +69,7 @@ class Sidebar(QFrame):
         )
         layout.addWidget(app_name)
 
-        tagline = QLabel("A Scarlet Raven app")
+        tagline = QLabel("A Scarlet Coder app")
         tagline.setStyleSheet(
             f"QLabel {{ color: {config.COLOR_ACCENT}; font-size: 10px; "
             f"font-weight: 600; letter-spacing: 0.6px; "

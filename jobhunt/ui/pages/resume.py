@@ -4,10 +4,11 @@ import json
 from pathlib import Path
 
 from PySide6.QtCore import Qt, Signal
+from PySide6.QtGui import QAction
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QInputDialog,
-    QMessageBox, QFileDialog, QTabWidget, QFrame, QLineEdit,
-    QPlainTextEdit, QStackedWidget, QScrollArea, QSizePolicy,
+    QMessageBox, QFileDialog, QTabWidget, QFrame, QLineEdit, QMenu,
+    QPlainTextEdit, QStackedWidget, QScrollArea, QSizePolicy, QToolButton,
 )
 
 from ... import config
@@ -510,9 +511,21 @@ class _ResumesTabWidget(QWidget):
         self.save_btn.setObjectName("PrimaryButton")
         self.save_btn.clicked.connect(self._on_save_version)
         header.addWidget(self.save_btn)
-        export_btn = QPushButton("Export…")
-        export_btn.setToolTip("Export current editor contents to Word or PDF")
-        export_btn.clicked.connect(self._on_export)
+        # Export button with format dropdown — explicit choice instead of
+        # hiding format selection inside the save dialog's filter combo.
+        export_btn = QToolButton()
+        export_btn.setText("Export ▾")
+        export_btn.setToolTip("Export current editor contents")
+        export_btn.setPopupMode(QToolButton.InstantPopup)
+        export_btn.setObjectName("GhostButton")
+        export_menu = QMenu(export_btn)
+        act_docx = QAction("Export as Word (.docx)", export_menu)
+        act_docx.triggered.connect(lambda: self._on_export("docx"))
+        export_menu.addAction(act_docx)
+        act_pdf = QAction("Export as PDF (.pdf)", export_menu)
+        act_pdf.triggered.connect(lambda: self._on_export("pdf"))
+        export_menu.addAction(act_pdf)
+        export_btn.setMenu(export_menu)
         header.addWidget(export_btn)
         outer.addLayout(header)
 
@@ -741,7 +754,16 @@ class _ResumesTabWidget(QWidget):
             "older ones are pruned automatically.",
         )
 
-    def _on_export(self):
+    def _on_export(self, fmt: str = "docx"):
+        """Export the current editor contents.
+
+        Format is chosen by the dropdown menu item — the save dialog is
+        locked to that single extension. Previously the format was inferred
+        from the user's filter pick in the save dialog, which most users
+        missed; this version puts the choice up-front."""
+        fmt = fmt.lower()
+        if fmt not in ("docx", "pdf"):
+            fmt = "docx"
         if self.current_type_id is None:
             QMessageBox.information(self, "No type", "Open a resume type first.")
             return
@@ -756,31 +778,26 @@ class _ResumesTabWidget(QWidget):
 
         type_row = DB.query_one("SELECT name FROM resume_types WHERE id = ?", (self.current_type_id,))
         type_name = (type_row["name"] if type_row else "resume").replace(" ", "_") or "resume"
-        path, selected_filter = QFileDialog.getSaveFileName(
-            self, "Export resume",
-            f"{type_name}.docx",
-            "Word Document (*.docx);;PDF Document (*.pdf)",
+        title = "Export resume as PDF" if fmt == "pdf" else "Export resume as Word"
+        file_filter = "PDF Document (*.pdf)" if fmt == "pdf" else "Word Document (*.docx)"
+        path, _ = QFileDialog.getSaveFileName(
+            self, title, f"{type_name}.{fmt}", file_filter,
         )
         if not path:
             return
-
-        lower = path.lower()
-        is_pdf = lower.endswith(".pdf") or "PDF" in (selected_filter or "")
-        if is_pdf and not lower.endswith(".pdf"):
-            path += ".pdf"
-        elif not is_pdf and not lower.endswith(".docx"):
-            path += ".docx"
+        if not path.lower().endswith(f".{fmt}"):
+            path += f".{fmt}"
 
         try:
             from ...documents.export import export_resume_docx, export_resume_pdf
-            if is_pdf:
+            if fmt == "pdf":
                 export_resume_pdf(content, path)
             else:
                 export_resume_docx(content, path)
         except Exception as e:
             QMessageBox.warning(self, "Export error", f"Couldn't export:\n{e}")
             return
-        DB.log_audit("resume_exported", {"path": path, "format": "pdf" if is_pdf else "docx"})
+        DB.log_audit("resume_exported", {"path": path, "format": fmt})
         QMessageBox.information(self, "Exported", f"Saved to:\n{path}")
 
     def _on_target_changed(self):
